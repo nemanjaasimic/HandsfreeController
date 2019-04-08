@@ -1,12 +1,15 @@
 from enum import Enum
 import cv2
 import numpy as np
+import time
+import guicontroller as gui
 from keras.models import load_model
 
 MODEL_PATH = "model/hand_model_gray.hdf5"
-HAND_BOX = (20, 50, 300, 300)
+HAND_BOX = (20, 50, 250, 250)
 NULL_POS = (170, 200)
 CLASSES = {
+    -1: 'NONE',
     0: 'FIST',
     1: 'HAND',
     2: 'POINTER',
@@ -29,6 +32,7 @@ class GestureRecognizer:
         self.recognizer = load_model(model_path)
         self.is_tracking = False
         self.hand_bbox = HAND_BOX
+        self.best_prediction_index = -1
 
         # Begin capturing video
         self.video = cv2.VideoCapture(capture)
@@ -104,16 +108,19 @@ class GestureRecognizer:
                                  int(self.hand_bbox[0]):int(self.hand_bbox[0]+self.hand_bbox[2])]
 
                 # Update tracker
-                if self.is_tracking:
-                    tracking, self.hand_bbox = self.tracker.update(foreground)
+                #if self.is_tracking:
+                    #tracking, self.hand_bbox = self.tracker.update(foreground)
 
                 try:
                     # Resize cropped hand and make prediction on gesture
                     hand_crop_resized = np.expand_dims(cv2.resize(hand_crop, (54, 54)), axis=0).reshape((1, 54, 54, 1))
-                    prediction = self.recognizer.predict(hand_crop_resized)
-                    best_prediction_index = prediction[0].argmax() # Get the index of the greatest confidence
-                    gesture = CLASSES[best_prediction_index]
-                    # TODO: process predicted gesture if is_tracking is enabled
+                    prediction = self.recognizer.predict(hand_crop_resized)                    
+                    mean = cv2.mean(hand_crop_display)
+                    if ((mean[0] + mean[1] + mean[2]) / 3) < 10:
+                        self.best_prediction_index = -1
+                    else:
+                        self.best_prediction_index = prediction[0].argmax() # Get the index of the greatest confidence
+                    gesture = CLASSES[self.best_prediction_index]
 
                     data_display = np.zeros((300, 500), dtype=np.uint8) # Black screen to display data
                     for i, pred in enumerate(prediction[0]):
@@ -125,7 +132,7 @@ class GestureRecognizer:
                         
                         # Make the most confidence prediction green
                         color = (0, 0, 255)
-                        if i == best_prediction_index:
+                        if i == self.best_prediction_index:
                             color = (0, 255, 0)
                         
                         cv2.putText(data_display, "{}: {:.0%} ".format(CLASSES[i], pred), (POSITIONS['gesture_text'][0], 30 + i*60), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 1)
@@ -152,10 +159,24 @@ class GestureRecognizer:
                 hand_pos = ((p1[0] + p2[0])//2, (p1[1] + p2[1])//2)
                 mouse_change = ((p1[0] + p2[0])//2 - POSITIONS['null_pos'][0], POSITIONS['null_pos'][0] - (p1[1] + p2[1])//2)
 
+                if self.is_tracking and pred > 0.5:
+                    if self.best_prediction_index == -1:
+                        print("NONE")
+                    elif self.best_prediction_index == 0:
+                        gui.take_screenshot()
+                    elif self.best_prediction_index == 1:
+                        gui.left_click()
+                        time.sleep(2)
+                    #elif self.best_prediction_index == 2:
+                        #gui.mouse_move(10, 10) # TODO: implement move logics
+                    elif self.best_prediction_index == 3:
+                        gui.scroll()
+                        time.sleep(1)
+
                 # Draw hand moved difference
-                cv2.circle(display, POSITIONS['null_pos'], 5, (0,0,255), -1)
-                cv2.circle(display, hand_pos, 5, (0,255,0), -1)
-                cv2.line(display, POSITIONS['null_pos'], hand_pos, (255,0,0),5)
+                # cv2.circle(display, POSITIONS['null_pos'], 5, (0,0,255), -1)
+                # cv2.circle(display, hand_pos, 5, (0,255,0), -1)
+                # cv2.line(display, POSITIONS['null_pos'], hand_pos, (255,0,0),5)
 
                 # Calculate Frames per second (FPS)
                 fps = cv2.getTickFrequency() / (cv2.getTickCount() - timer)
